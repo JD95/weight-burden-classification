@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 train = []
 
-with open('curl_leftlight_000Parsed.txt') as f:
+with open('data/curl_left(light)_000Parsed.txt') as f:
     lines = f.readlines()
     for line in lines[1:]:
         try:
@@ -40,7 +40,6 @@ model.compile(loss='mean_absolute_error',
 model.fit(train, train, batch_size=256, shuffle=True,
           validation_split=0.2, epochs=100, verbose=1)
 
-
 score = model.evaluate(train, train, verbose=0)
 
 encoded_values = encoder.predict(train)
@@ -51,7 +50,10 @@ print('result is: ' + str(score))
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
-ax.scatter(train[0][0::3], train[0][1::3], train[0][2::3], c='r')
-ax.scatter(outputs[0][0::3], outputs[0][1::3], outputs[0][2::3], c='b')
+for frame in [(0,'r'),(1,'b'),(2,'g')]:
+    ax.scatter(outputs[frame[0]][0::3], outputs[frame[0]][1::3], outputs[frame[0]][2::3], c=frame[1])
+
+# ax.scatter(train[0][0::3], train[0][1::3], train[0][2::3], c='r')
+# ax.scatter(outputs[0][0::3], outputs[0][1::3], outputs[0][2::3], c='b')
 
 plt.show()
