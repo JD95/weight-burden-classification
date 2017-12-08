@@ -1,5 +1,6 @@
 import numpy as np
 
+import keras
 from keras.models import Sequential, Model, save_model, load_model
 from keras.layers import Input, Dense, Conv2D, LSTM, MaxPooling2D, UpSampling2D, TimeDistributed
 from keras.utils import np_utils
@@ -9,6 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from os import listdir
 from os.path import isfile, join
 import re
+import random
 
 
 def parse_data_file(filepath):
@@ -112,27 +114,38 @@ def data_aug(data, labels):
 
     rotating subsamples 359 times around y axis
     """
+    aug_data = np.zeros(90 * 360 * 78)
+    aug_data = np.reshape(aug_data, (90, 360, 78))
+    point = np.zeros(3)
+    batch_size = 90
+
     while True:
         for s in range(0, len(data)):
-            for subsample in range(0, 240):
-                for theta in range(0, 360):
-                    aug_data = np.zeros(360 * 78)
-                    aug_data = np.reshape(aug_data, (1, 360, 78))
+            s_labels = np.reshape(np.repeat(labels[s],batch_size), (batch_size, 3))
+            for b in range(0,batch_size):
+                    
+                subsample = random.randint(0,240)
+                theta = random.randint(0,360)
+                rot = y_rotation_matrix(theta)
 
-                    for i in range(subsample, subsample + 360):
+                # Take 3 second subsample
+                for i in range(subsample, subsample + 359):
 
-                        # forall subsamples
-                        for j in range(0, 26):
-                            x = data[s][i][3 * j]
-                            y = data[s][i][3 * j + 1]
-                            z = data[s][i][3 * j + 2]
-                            point = np.array([x, y, z])
-                            point = (point*y_rotation_matrix(theta)).tolist()[0]
-                            aug_data[0][i][3 * j] = point[0]
-                            aug_data[0][i][3 * j + 1] = point[1]
-                            aug_data[0][i][3 * j + 2] = point[2]
+                    # forall subsamples
+                    for j in range(0, 26):
+                        j0 = 3*j
+                        j1 = j0 + 1
+                        j2 = j0 + 2
+                        point[0] = data[s][i][j0]
+                        point[1] = data[s][i][j1]
+                        point[2] = data[s][i][j2]
+                        point = (point * rot).tolist()[0]
+                        i_sample = i - subsample
+                        aug_data[b][i_sample][j0] = point[0]
+                        aug_data[b][i_sample][j1] = point[1]
+                        aug_data[b][i_sample][j2] = point[2]
 
-                    yield (aug_data, np.reshape(labels[s], (1,3)))
+            yield (aug_data, s_labels)
 
 
 def train_auto_encoder(data_set):
@@ -142,7 +155,7 @@ def train_auto_encoder(data_set):
     encoded = Dense(20, activation='relu')(input_layer)
     decoded = Dense(78, activation='sigmoid')(encoded)
     model = Model(input_layer, decoded)
- 
+
     # Encoder
     encoder = Model(input_layer, encoded)
 
@@ -165,6 +178,7 @@ def train_auto_encoder(data_set):
 
     return encoder
 
+
 def train_LSTM(encoder, data_set):
     model = Sequential()
     model.add(TimeDistributed(encoder, input_shape=(360, 78), name="TimeDense"))
@@ -172,10 +186,15 @@ def train_LSTM(encoder, data_set):
     model.add(Dense(3, activation="softmax", name="DenseLayer"))
 
     model.compile(loss='categorical_crossentropy', optimizer='adam')
+    tbCallback = keras.callbacks.TensorBoard(log_dir='./Graph',
+                                             histogram_freq=0,
+                                             write_graph=True,
+                                             write_images=True)
     model.fit_generator(data_aug(data_set.train, data_set.train_labels),
                         epochs=100,
-                        steps_per_epoch=60000,
-                        verbose=2)
+                        steps_per_epoch=189,
+                        verbose=2,
+                        callbacks=[tbCallback])
 
     return model
 
@@ -224,7 +243,6 @@ def main():
 
     score = model.evaluate(data_set.test, data_set.test_labels, verbose=0)
     print('score is: ' + str(score))
-
 
 
 if __name__ == "__main__":
