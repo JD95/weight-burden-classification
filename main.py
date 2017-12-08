@@ -85,11 +85,11 @@ def load_data(folder):
     for f in files:
         filepath = folder + '/' + f
         if 'light' in f:
-            add_to_data_set(filepath, [1.0, 0.0, 0.0], data_set)
+            add_to_data_set(filepath, np.array([1.0, 0.0, 0.0]), data_set)
         elif 'normal' in f:
-            add_to_data_set(filepath, [0.0, 1.0, 0.0], data_set)
+            add_to_data_set(filepath, np.array([0.0, 1.0, 0.0]), data_set)
         elif 'heavy' in f:
-            add_to_data_set(filepath, [0.0, 0.0, 1.0], data_set)
+            add_to_data_set(filepath, np.array([0.0, 0.0, 1.0]), data_set)
         else:
             pass
 
@@ -127,12 +127,12 @@ def data_aug(data, labels):
                             y = data[s][i][3 * j + 1]
                             z = data[s][i][3 * j + 2]
                             point = np.array([x, y, z])
-                            point = point*y_rotation_matrix(theta) 
-                            aug_data[0][i][3 * j] = point[0][0]
-                            aug_data[0][i][3 * j + 1] = point[0][1]
-                            aug_data[0][i][3 * j + 2] = point[0][2]
+                            point = (point*y_rotation_matrix(theta)).tolist()[0]
+                            aug_data[0][i][3 * j] = point[0]
+                            aug_data[0][i][3 * j + 1] = point[1]
+                            aug_data[0][i][3 * j + 2] = point[2]
 
-                    yield [aug_data, labels[s]]
+                    yield (aug_data, np.reshape(labels[s], (1,3)))
 
 
 def train_auto_encoder(data_set):
@@ -142,7 +142,7 @@ def train_auto_encoder(data_set):
     encoded = Dense(20, activation='relu')(input_layer)
     decoded = Dense(78, activation='sigmoid')(encoded)
     model = Model(input_layer, decoded)
-
+ 
     # Encoder
     encoder = Model(input_layer, encoded)
 
@@ -167,9 +167,9 @@ def train_auto_encoder(data_set):
 
 def train_LSTM(encoder, data_set):
     model = Sequential()
-    model.add(TimeDistributed(encoder, input_shape=(600, 78)))
-    model.add(LSTM(20, input_shape=(10, 20), dropout=0.25))
-    model.add(Dense(3, activation="softmax"))
+    model.add(TimeDistributed(encoder, input_shape=(360, 78), name="TimeDense"))
+    model.add(LSTM(20, input_shape=(10, 20), dropout=0.25, name="LSTM"))
+    model.add(Dense(3, activation="softmax", name="DenseLayer"))
 
     model.compile(loss='categorical_crossentropy', optimizer='adam')
     model.fit_generator(data_aug(data_set.train, data_set.train_labels),
