@@ -71,7 +71,6 @@ def add_to_data_set(filepath, category, data_set):
         # motion to remove the inital readying
         # of the animation
         data = data[len(data) - 600:]
-        print(filepath + ' had ' + str(len(data)) + ' frames')
         data_set.train.append(data)
         data_set.train_labels.append(category)
     except IndexError:
@@ -96,6 +95,44 @@ def load_data(folder):
 
     print('loaded ' + str(len(data_set.train)) + ' clips')
     return data_set
+
+
+def y_rotation_matrix(theta):
+    return np.matrix([
+        [np.cos(theta), 0, np.sin(theta)],
+        [0, 1, 0],
+        [-np.sin(theta), 0, np.cos(theta)]])
+
+
+def data_aug(data, labels):
+    """
+    data is 189x600x78
+
+    taking 360 length slice (3 seconds), giving 240 subsamples
+
+    rotating subsamples 359 times around y axis
+    """
+    while True:
+        for s in range(0, len(data)):
+            for subsample in range(0, 240):
+                for theta in range(0, 360):
+                    aug_data = np.zeros(360 * 78)
+                    aug_data = np.reshape(aug_data, (1, 360, 78))
+
+                    for i in range(subsample, subsample + 360):
+
+                        # forall subsamples
+                        for j in range(0, 26):
+                            x = data[s][i][3 * j]
+                            y = data[s][i][3 * j + 1]
+                            z = data[s][i][3 * j + 2]
+                            point = np.array([x, y, z])
+                            point = point*y_rotation_matrix(theta) 
+                            aug_data[0][i][3 * j] = point[0][0]
+                            aug_data[0][i][3 * j + 1] = point[0][1]
+                            aug_data[0][i][3 * j + 2] = point[0][2]
+
+                    yield [aug_data, labels[s]]
 
 
 def train_auto_encoder(data_set):
@@ -128,19 +165,32 @@ def train_auto_encoder(data_set):
 
     return encoder
 
+def train_LSTM(encoder, data_set):
+    model = Sequential()
+    model.add(TimeDistributed(encoder, input_shape=(600, 78)))
+    model.add(LSTM(20, input_shape=(10, 20), dropout=0.25))
+    model.add(Dense(3, activation="softmax"))
+
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    model.fit_generator(data_aug(data_set.train, data_set.train_labels),
+                        epochs=100,
+                        steps_per_epoch=60000,
+                        verbose=2)
+
+    return model
+
 
 def main():
 
+    print("Loading Data...")
     data_set = load_data('data')
 
-    print(str(len(data_set.train)) + ' ' + str(len(data_set.train[0])))
+    print("Normalizing Data...")
     data_set.train = normalize_data(data_set.train)
 
-    print(str(len(data_set.train)) + ' ' + str(len(data_set.train[0])))
-    flatten = lambda l: [item for sublist in l for item in sublist]
-    data_set.train = flatten(data_set.train) 
+    def flatten(l): return [item for sublist in l for item in sublist]
+    data_set.train = flatten(data_set.train)
 
-    print(str(len(data_set.train)) + ' ' + str(len(data_set.train[0])))
     encoder = None
 
     try:
@@ -152,20 +202,29 @@ def main():
         print('Saving encoder to \"encoder.h5\"')
         encoder.save('encoder.h5')
 
-    print(str(len(data_set.train)) + ' ' + str(len(data_set.train[0])))
     # Completely Flatten List for reshaping
-    data_set.train = flatten(data_set.train) 
+    data_set.train = flatten(data_set.train)
 
-    data_set.train = np.reshape(data_set.train, (191, 600, 78))
+    data_set.train = np.reshape(data_set.train, (189, 600, 78))
 
-    model = Sequential()
-    model.add(TimeDistributed(encoder,input_shape=(600,78)))
-    model.add(LSTM(4, input_shape=(10, 20)))
-    model.add(Dense(3))
+    data_set.test = data_set.train[0:37]
+    data_set.test_labels = data_set.test[0:37]
 
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(data_set.train, data_set.train_labels,
-              epochs=100, batch_size=1, verbose=2)
+    data_set.train = data_set.train[37:]
+    data_set.train_labels = data_set.train_labels[37:]
+
+    try:
+        print('Loading LSTM...')
+        model = load_model('classifer.h5')
+    except OSError:
+        print('Classifier not found, training a new one...')
+        model = train_LSTM(encoder, data_set)
+        print('Saving classifer to \"classifer.h5\"')
+        model.save('classifer.h5')
+
+    score = model.evaluate(data_set.test, data_set.test_labels, verbose=0)
+    print('score is: ' + str(score))
+
 
 
 if __name__ == "__main__":
