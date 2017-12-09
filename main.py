@@ -4,7 +4,7 @@ import keras
 from keras.models import Sequential, Model, save_model, load_model
 from keras.layers import Input, Dense, Conv2D, LSTM, MaxPooling2D, UpSampling2D, TimeDistributed
 from keras.utils import np_utils
-
+from keras.optimizers import SGD
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from os import listdir
@@ -82,6 +82,7 @@ def add_to_data_set(filepath, category, data_set):
 def load_data(folder):
     """ loads data for autoencoder """
     files = [f for f in listdir(folder) if isfile(join(folder, f))]
+    random.shuffle(files)
     data_set = DataSet()
 
     for f in files:
@@ -114,38 +115,41 @@ def data_aug(data, labels):
 
     rotating subsamples 359 times around y axis
     """
-    aug_data = np.zeros(90 * 360 * 78)
-    aug_data = np.reshape(aug_data, (90, 360, 78))
-    point = np.zeros(3)
+    clip_length = 60
     batch_size = 90
+    aug_data = np.zeros(batch_size * clip_length * 78)
+    aug_data = np.reshape(aug_data, (batch_size, clip_length, 78))
+    s_labels  = np.zeros(batch_size*3)
+    s_labels = np.reshape(s_labels, (batch_size, 3))
+    point = np.zeros(3)
 
     while True:
-        for s in range(0, len(data)):
-            s_labels = np.reshape(np.repeat(labels[s],batch_size), (batch_size, 3))
-            for b in range(0,batch_size):
-                    
-                subsample = random.randint(0,240)
-                theta = random.randint(0,360)
-                rot = y_rotation_matrix(theta)
+        for b in range(0, batch_size):
+            s = random.randint(0,len(data)-1)
+            label = labels[s]
+            s_labels[b] = label
+            subsample = random.randint(0,240)
+            theta = random.randint(0,360)
+            rot = y_rotation_matrix(theta)
 
                 # Take 3 second subsample
-                for i in range(subsample, subsample + 359):
+            for i in range(subsample, subsample + (clip_length-1)):
 
-                    # forall subsamples
-                    for j in range(0, 26):
-                        j0 = 3*j
-                        j1 = j0 + 1
-                        j2 = j0 + 2
-                        point[0] = data[s][i][j0]
-                        point[1] = data[s][i][j1]
-                        point[2] = data[s][i][j2]
-                        point = (point * rot).tolist()[0]
-                        i_sample = i - subsample
-                        aug_data[b][i_sample][j0] = point[0]
-                        aug_data[b][i_sample][j1] = point[1]
-                        aug_data[b][i_sample][j2] = point[2]
+                # forall subsamples
+                for j in range(0, 26):
+                    j0 = 3*j
+                    j1 = j0 + 1
+                    j2 = j0 + 2
+                    point[0] = data[s][i][j0]
+                    point[1] = data[s][i][j1]
+                    point[2] = data[s][i][j2]
+                    point = (point * rot).tolist()[0]
+                    i_sample = i - subsample
+                    aug_data[b][i_sample][j0] = point[0]
+                    aug_data[b][i_sample][j1] = point[1]
+                    aug_data[b][i_sample][j2] = point[2]
 
-            yield (aug_data, s_labels)
+        yield (aug_data, s_labels)
 
 
 def train_auto_encoder(data_set):
@@ -181,20 +185,37 @@ def train_auto_encoder(data_set):
 
 def train_LSTM(encoder, data_set):
     model = Sequential()
-    model.add(TimeDistributed(encoder, input_shape=(360, 78), name="TimeDense"))
-    model.add(LSTM(20, input_shape=(10, 20), dropout=0.25, name="LSTM"))
-    model.add(Dense(3, activation="softmax", name="DenseLayer"))
+    model.add(TimeDistributed(encoder,
+                              input_shape=(60, 78),
+                              name="TimeDense"))
 
-    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    model.add(LSTM(20, input_shape=(10, 20),
+                   dropout=0.40,
+                   name="LSTM"))
+
+    model.add(Dense(3,
+                    activation="softmax",
+                    name="DenseLayer"))
+
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=SGD(momentum=0.6),
+                  metrics=['categorical_accuracy'])
+
     tbCallback = keras.callbacks.TensorBoard(log_dir='./Graph',
                                              histogram_freq=0,
                                              write_graph=True,
                                              write_images=True)
+    earlyStopCallBack = keras.callbacks.EarlyStopping(
+        patience=4,
+        min_delta=0.001,
+        mode='max',
+        monitor='val_categorical_accuracy')
+
     model.fit_generator(data_aug(data_set.train, data_set.train_labels),
-                        epochs=100,
+                        epochs=20,
                         steps_per_epoch=189,
                         verbose=2,
-                        callbacks=[tbCallback])
+                        callbacks=[tbCallback, earlyStopCallBack])
 
     return model
 
@@ -227,7 +248,7 @@ def main():
     data_set.train = np.reshape(data_set.train, (189, 600, 78))
 
     data_set.test = data_set.train[0:37]
-    data_set.test_labels = data_set.test[0:37]
+    data_set.test_labels = data_set.train_labels[0:37]
 
     data_set.train = data_set.train[37:]
     data_set.train_labels = data_set.train_labels[37:]
@@ -241,7 +262,8 @@ def main():
         print('Saving classifer to \"classifer.h5\"')
         model.save('classifer.h5')
 
-    score = model.evaluate(data_set.test, data_set.test_labels, verbose=0)
+    test_gen = data_aug(data_set.test, data_set.test_labels)
+    score = model.evaluate_generator(test_gen, steps=10)
     print('score is: ' + str(score))
 
 
