@@ -11,6 +11,7 @@ from os import listdir
 from os.path import isfile, join
 import re
 import random
+from sklearn.metrics  import classification_report
 
 
 def parse_data_file(filepath):
@@ -128,7 +129,7 @@ def data_aug(data, labels):
             s = random.randint(0,len(data)-1)
             label = labels[s]
             s_labels[b] = label
-            subsample = random.randint(0,240)
+            subsample = random.randint(0, 600-clip_length)
             theta = random.randint(0,360)
             rot = y_rotation_matrix(theta)
 
@@ -265,6 +266,12 @@ def main():
     test_gen = data_aug(data_set.test, data_set.test_labels)
     score = model.evaluate_generator(test_gen, steps=10)
     print('score is: ' + str(score))
+
+    print('class info:')
+    test_batch = next(test_gen)
+    Y_test = np.argmax(test_batch[1], axis=1)
+    y_pred = np.argmax(model.predict(test_batch[0]), axis=1)
+    print(classification_report(Y_test, y_pred))
 
 
 if __name__ == "__main__":
